@@ -20,15 +20,28 @@ class OneHotEncoder:
         if self.remove_stopwords:
             self.stopwords = set(self.nltk.corpus.stopwords.words('english'))
         
-    def fit(self, documents):
+    def fit_job(self, documents):
+        vocabs = set()
         for document in documents:
             tokens = self.nltk.word_tokenize(document)
             if self.remove_punctuation:
                 tokens = [i for i in tokens if i not in self.punctuation]
             if self.remove_stopwords:
                 tokens = [i for i in tokens if i not in self.stopwords]
-            self.vocabs |= set(tokens)
-        self.vocabs = list(self.vocabs)
+            vocabs |= set(tokens)
+        return list(vocabs)
+        
+    def fit(self, documents):
+        if self.n_jobs > 1:
+            pool = self.mp.Pool(self.n_jobs)
+            split_documents = []
+            split_len = int(len(documents)/self.n_jobs)
+            for i in range(self.n_jobs):
+                split_documents.append(documents[(i*split_len):((i+1)*split_len)])
+            res = pool.map(self.fit_job, split_documents)
+            self.vocabs =  self.np.concatenate(res, axis=0)
+        else:
+            self.vocabs = self.fit_job(documents)
         
     def transform_job(self, documents):
         """
@@ -68,10 +81,115 @@ class OneHotEncoder:
         else:
             return self.transform_job(documents)
             
-    
     def fit_transform(self, documents):
         self.fit(documents)
         return self.transform(documents)
     
     
-    
+class TfIdfEncoder:
+    nltk = __import__('nltk')
+    np = __import__('numpy')
+    string = __import__('string')
+    mp = __import__('multiprocessing')
+    math = __import__('math')
+    def __init__(self, remove_stopwords=False, remove_punctuation=False, stemming=False, n_jobs=2):
+        self.vocabs = set()
+        self.idf_map = dict()
+        self.stemming = stemming
+        self.remove_punctuation = remove_punctuation
+        self.remove_stopwords = remove_stopwords
+        if n_jobs < 1:
+            self.n_jobs = self.mp.cpu_count()
+        else:
+            self.n_jobs = n_jobs
+        if self.remove_punctuation:
+            self.punctuation = set(self.string.punctuation)
+        if self.remove_stopwords:
+            self.stopwords = set(self.nltk.corpus.stopwords.words('english'))
+        
+    def fit_job(self, documents):
+        df_map = dict()
+        for document in documents:
+            tokens = self.nltk.word_tokenize(document)
+            if self.remove_punctuation:
+                tokens = [i for i in tokens if i not in self.punctuation]
+            if self.remove_stopwords:
+                tokens = [i for i in tokens if i not in self.stopwords]
+            for token in tokens:
+                df_map[token] = df_map.get(token, 0) + 1
+        return df_map
+        
+    def fit(self, documents):
+        self.idf_map = dict()
+        if self.n_jobs > 1:
+            pool = self.mp.Pool(self.n_jobs)
+            split_documents = []
+            split_len = int(len(documents)/self.n_jobs)
+            for i in range(self.n_jobs):
+                split_documents.append(documents[(i*split_len):((i+1)*split_len)])
+            df_maps = pool.map(self.fit_job, split_documents)
+            agg_df_map = dict()
+            for df_map in df_maps:
+                for key, value in df_map.items():
+                    agg_df_map[key] = agg_df_map.get(key, 0) + value
+            self.doc_size = len(agg_df_map.keys())
+            self.vocabs = list(agg_df_map.keys())
+            for key, value in agg_df_map.items():
+                self.idf_map[key] = self.math.log(self.doc_size / (value+1))
+        else:
+            df_map = self.fit_job(documents)
+            self.doc_size = len(df_map.keys())
+            self.vocabs = list(df_map.keys())
+            for key, value in df_map.items():
+                self.idf_map[key] = self.math.log(self.doc_size / (value+1))
+            
+            
+        
+    def transform_job(self, documents):
+        """
+        Convert input documents as one-hot encoding vectors
+        """
+        vocabs_size = len(self.vocabs)
+        ttl_tokens_cnt = len(self.idf_map)
+        if vocabs_size == 0:
+            raise 'Not fit data'
+        rtn_tfidfs = []
+        for document in documents:
+            tokens = self.nltk.word_tokenize(document)
+            if self.remove_punctuation:
+                tokens = [i for i in tokens if i not in self.punctuation]
+            if self.remove_stopwords:
+                tokens = [i for i in tokens if i not in self.stopwords]
+            tf_map = dict()
+            for token in tokens:
+                tf_map[token] = tf_map.get(token, 0) + 1
+            tfidf = self.np.zeros(vocabs_size+1, dtype=float)
+            for token in tokens:
+                tf = tf_map.get(token)/ttl_tokens_cnt
+                try:
+                    idf = self.idf_map.get(token)
+                    tfidf[self.vocabs.index(token)] = tf * idf
+                except:
+                    idf = self.math.log(len(self.idf_map.keys()) / 1)
+                    tfidf[vocabs_size] = tf * idf
+            rtn_tfidfs.append(tfidf)
+        return rtn_tfidfs
+        
+    def transform(self, documents):
+        """
+        Convert input documents as one-hot encoding vectors w/ apply multiple thread
+        """
+#        if self.n_jobs > 1:
+#            pool = self.mp.Pool(self.n_jobs)
+#            split_documents = []
+#            split_len = int(len(documents)/self.n_jobs)
+#            for i in range(self.n_jobs):
+#                split_documents.append(documents[(i*split_len):((i+1)*split_len)])
+#            res = pool.map(self.transform_job, split_documents)
+#            return self.np.concatenate(res, axis=0)
+#        else:
+        return self.transform_job(documents)
+            
+    def fit_transform(self, documents):
+        self.fit(documents)
+        return self.transform(documents)

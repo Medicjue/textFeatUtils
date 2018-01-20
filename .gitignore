@@ -1,3 +1,4 @@
 .spyproject/
 local_test.py
 long.txt
+tmp/
