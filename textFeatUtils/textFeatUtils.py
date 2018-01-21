@@ -221,20 +221,9 @@ class CharEmbeddedEncoder:
                 return data
         return data
     
-    def transform_job(self, documents):
+    def transform(self, documents):
         char_vecs = []
         for document in documents:
             char_vecs.append(self.char2vec(document))
         return self.np.asarray(char_vecs, dtype=int)
     
-    def transform(self, documents):
-        if self.n_jobs > 1:
-            pool = self.mp.Pool(self.n_jobs)
-            split_documents = []
-            split_len = int(len(documents)/self.n_jobs)
-            for i in range(self.n_jobs):
-                split_documents.append(documents[(i*split_len):((i+1)*split_len)])
-            res = pool.map(self.transform_job, split_documents)
-            return self.np.concatenate(res, axis=0)
-        else:
-            return self.transform_job(documents)
