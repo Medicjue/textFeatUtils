@@ -39,7 +39,9 @@ class OneHotEncoder:
             for i in range(self.n_jobs):
                 split_documents.append(documents[(i*split_len):((i+1)*split_len)])
             res = pool.map(self.fit_job, split_documents)
-            self.vocabs =  self.np.concatenate(res, axis=0)
+            pool.close()
+            pool.join()
+            self.vocabs =  self.np.concatenate(res, axis=0).tolist()
         else:
             self.vocabs = self.fit_job(documents)
         
@@ -77,7 +79,9 @@ class OneHotEncoder:
             for i in range(self.n_jobs):
                 split_documents.append(documents[(i*split_len):((i+1)*split_len)])
             res = pool.map(self.transform_job, split_documents)
-            return self.np.concatenate(res, axis=0)
+            pool.close()
+            pool.join()
+            return self.np.concatenate(res, axis=0).tolist()
         else:
             return self.transform_job(documents)
             
